@@ -1,10 +1,10 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
+const { initializeFirebase } = require('./config/firebase');
 
 const authRoutes = require('./routes/auth');
 const questionRoutes = require('./routes/questions');
@@ -41,18 +41,22 @@ app.use(limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/quizethic', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+// Initialize Firebase
+try {
+  initializeFirebase();
+  console.log('Firebase initialized successfully');
+} catch (error) {
+  console.error('Firebase initialization error:', error);
+  process.exit(1);
+}
 
-mongoose.connection.on('connected', () => {
-  console.log('Connected to MongoDB');
-});
-
-mongoose.connection.on('error', (err) => {
-  console.error('MongoDB connection error:', err);
+// Health check route
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    database: 'firebase'
+  });
 });
 
 // Routes

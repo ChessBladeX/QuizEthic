@@ -22,13 +22,13 @@ router.post('/register', [
     const { email, password, firstName, lastName, role = 'student' } = req.body;
 
     // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findByEmail(email);
     if (existingUser) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
     // Create new user
-    const user = new User({
+    const user = await User.create({
       email,
       password,
       firstName,
@@ -36,11 +36,9 @@ router.post('/register', [
       role
     });
 
-    await user.save();
-
     // Generate JWT
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user.id, role: user.role },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '7d' }
     );
@@ -49,7 +47,7 @@ router.post('/register', [
       message: 'User created successfully',
       token,
       user: {
-        id: user._id,
+        id: user.id,
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -76,29 +74,26 @@ router.post('/login', [
     const { email, password } = req.body;
 
     // Find user
-    const user = await User.findOne({ email });
+    const user = await User.findByEmail(email);
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
     // Check password
-    const isMatch = await user.comparePassword(password);
+    const bcrypt = require('bcryptjs');
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Update login history
-    user.loginHistory.push({
-      ip: req.ip,
-      userAgent: req.get('User-Agent'),
-      timestamp: new Date()
+    // Update last login
+    await user.update({
+      lastLogin: new Date()
     });
-    user.lastLogin = new Date();
-    await user.save();
 
     // Generate JWT
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user.id, role: user.role },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '7d' }
     );
@@ -107,7 +102,7 @@ router.post('/login', [
       message: 'Login successful',
       token,
       user: {
-        id: user._id,
+        id: user.id,
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -123,8 +118,11 @@ router.post('/login', [
 // Get current user
 router.get('/me', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select('-password');
-    res.json(user);
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    res.json(user.toJSON());
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -145,15 +143,17 @@ router.put('/profile', auth, [
     }
 
     const updates = req.body;
-    const user = await User.findByIdAndUpdate(
-      req.userId,
-      { $set: updates },
-      { new: true, runValidators: true }
-    ).select('-password');
+    const user = await User.findById(req.userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    await user.update(updates);
 
     res.json({
       message: 'Profile updated successfully',
-      user
+      user: user.toJSON()
     });
   } catch (error) {
     console.error('Profile update error:', error);
