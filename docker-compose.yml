@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:6.0
+    container_name: quizethic-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: quizethic
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./server/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - quizethic-network
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    container_name: quizethic-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - quizethic-network
+
+  # Backend API
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: quizethic-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGODB_URI: mongodb://admin:password123@mongodb:27017/quizethic?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      CLIENT_URL: http://localhost:3000
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./server/uploads:/app/uploads
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - quizethic-network
+    healthcheck:
+      test: ["CMD", "node", "healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: quizethic-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - quizethic-network
+
+  # Nginx Load Balancer (optional)
+  nginx:
+    image: nginx:alpine
+    container_name: quizethic-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - quizethic-network
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  quizethic-network:
+    driver: bridge
